@@ -2,10 +2,12 @@
 
 # C extensions
 *.so
-
+*.json
+*~
 # Packages
 *.egg
 *.egg-info
+.checkmate
 dist
 build
 eggs
