@@ -5,6 +5,7 @@
 *.json
 *~
 # Packages
+*.html
 *.egg
 *.egg-info
 .checkmate

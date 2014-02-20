@@ -33,13 +33,13 @@ def main():
     filename = our_args[0]
     outfile = args.o
 
-    tracer = Tracer(verbose = False)
+    tracer = Tracer(verbose = False,method = "raw",trace_hierarchy = True)
 
     with open(filename,"r") as python_file:
         sys.argv = [os.path.abspath(filename)]+sys.argv[3:]
         try:
             tracer.start()
-            exec python_file
+            exec python_file in {'__name__':'__main__'}
         except SystemExit as e:
             pass
         except BaseException as e:
@@ -50,10 +50,7 @@ def main():
     profile = tracer.profile
     if __file__ in profile:
         del profile[__file__]
-    for filename,line_timings in profile.items():
-        total_time = max([x[1] for x  in line_timings.values()])
-        profile[filename] = {'total_time' : total_time,'line_timings' : line_timings}
-    profile_items = sorted(profile.items(),key = lambda x: -x[1]['total_time'])
+    profile_items = tracer.get_sorted_profile()
     print "Elapsed time: %g" % tracer.elapsed_time
 
     with open(outfile,"wb") as output_file:

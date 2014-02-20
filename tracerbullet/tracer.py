@@ -21,6 +21,13 @@ class Tracer(object):
         self._stop_time = 0
         self._last_executed_statement = None
 
+    def get_sorted_profile(self):
+        sorted_profile = {}
+        for filename,line_timings in self.profile.items():
+            total_time = max([x[1] for x  in line_timings.values()])
+            sorted_profile[filename] = {'total_time' : total_time,'line_timings' : line_timings}
+        profile_items = sorted(sorted_profile.items(),key = lambda x: -x[1]['total_time'])
+        return profile_items
 
     def start(self):
         self._start_time = time.time()

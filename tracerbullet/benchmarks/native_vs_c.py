@@ -5,22 +5,22 @@ import sys
 def benchmark(filename):
 
     native_tracer = tracerbullet.tracer.Tracer(verbose = False)
-    ctracer = tracerbullet.ctracer.Tracer(verbose = False)
+    ctracer = tracerbullet.ctracer.Tracer(verbose = False,method = "raw",trace_hierarchy = True)
 
     code = open(filename,"r").read()
 
     def benchmark_tracer(tracer):
 
         total_time = 0
-        for i in range(0,200):
+        for i in range(0,4000):
             start_time = time.time()
             if tracer:
                 tracer.reset()
                 tracer.start()
             exec code in locals(),locals()
+            stop_time = time.time()
             if tracer:
                 tracer.stop()
-            stop_time = time.time()
             total_time+=stop_time-start_time
         if tracer:
             return total_time,tracer.profile
