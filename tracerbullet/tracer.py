@@ -8,8 +8,9 @@ from collections import defaultdict
 
 class Tracer(object):
 
-    def __init__(self,verbose = True):
+    def __init__(self,verbose = True,trace_hierarchy = False,method = "normal"):
         self.verbose = verbose
+        self.trace_hierarchy = trace_hierarchy
         self.reset()
 
     def reset(self):
@@ -71,13 +72,17 @@ class Tracer(object):
             cnts[0]+=1
             cnts[1]+=elapsed_time
 
-            for filename,line_number in self._trace_stack:
-                if self.verbose:
-                    print "\t\t\t",filename,line_number," + ",elapsed_time
-                cnts = self._profile[filename][line_number]
-                cnts[1]+=elapsed_time
+            if self.trace_hierarchy:
+                for filename,line_number in self._trace_stack:
+                    if self.verbose:
+                        print "\t\t\t",filename,line_number," + ",elapsed_time
+                    cnts = self._profile[filename][line_number]
+                    cnts[1]+=elapsed_time
 
         self._last_executed_statement = (frame.f_code.co_filename,frame.f_lineno)
+
+        if not self.trace_hierarchy:
+            return self.trace
 
         if event == "line":
             pass

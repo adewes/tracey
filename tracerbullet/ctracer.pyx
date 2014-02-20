@@ -136,9 +136,9 @@ cdef class Tracer(object):
 
     def stop(self,delete_self = True):
         sys.settrace(None)
+        self._stop_time = clock()/CLOCKS_PER_SEC
         if self.method == "raw":
             self._process_trace()
-        self._stop_time = clock()/CLOCKS_PER_SEC
         if delete_self:
             if __file__ in self._profile:
                 del self._profile[__file__]
@@ -214,6 +214,9 @@ cdef int trace_call(object self,PyFrameObject *py_frame,int event,PyObject* arg)
 
     self._last_executed_statement = (frame.f_code.co_filename,frame.f_lineno)
 
+    if not self.trace_hierarchy:
+        return 0
+
     if event == PyTrace_CALL or event == PyTrace_C_CALL:
         if frame.f_back != None:
             self._trace_stack.append([frame.f_back.f_code.co_filename,frame.f_back.f_lineno])
@@ -221,3 +224,4 @@ cdef int trace_call(object self,PyFrameObject *py_frame,int event,PyObject* arg)
         if frame.f_back != None:
             if [frame.f_back.f_code.co_filename,frame.f_back.f_lineno] in self._trace_stack:
                 self._trace_stack.remove([frame.f_back.f_code.co_filename,frame.f_back.f_lineno])
+    return 0

@@ -33,7 +33,7 @@ def main():
     filename = our_args[0]
     outfile = args.o
 
-    tracer = Tracer(verbose = False,method = "raw",trace_hierarchy = True)
+    tracer = Tracer(verbose = False,method = "normal",trace_hierarchy = True)
 
     with open(filename,"r") as python_file:
         sys.argv = [os.path.abspath(filename)]+sys.argv[3:]
