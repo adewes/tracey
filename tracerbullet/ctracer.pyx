@@ -35,15 +35,12 @@ cdef class Tracer(object):
 
     cdef public double verbose
     cdef public _profile
-    cdef public double _last_time
-    cdef public _last_executed_statement
-    cdef public _trace_stack
+    cdef public _last_executed_code
     cdef public double _start_time
+    cdef public _processed_profile
     cdef public double _stop_time
-    cdef public trace_hierarchy
-    cdef public _call_trace
-    cdef public _filename_map
-    cdef public _filename_index 
+    cdef public _code_to_track
+    cdef public _n_starts
     cdef public method
 
     def get_sorted_profile(self):
@@ -56,94 +53,58 @@ cdef class Tracer(object):
 
     def __init__(self,verbose = True,trace_hierarchy = False,method = "normal"):
         self.verbose = verbose
-        self.trace_hierarchy = trace_hierarchy
         self.method = method
-        self._last_executed_statement = None
-        self._trace_stack = []
-        self._call_trace = []
         self.reset()
 
     cpdef reset(self):
 
         self._profile = {}
-        self._filename_map = {}
-        self._filename_index = 0
-        self._last_executed_statement = None
-        self._last_time = 0.0
-        self._call_trace = []
+        self._last_executed_code = {}
         self._start_time = 0.0
+        self._n_starts = 0
         self._stop_time = 0.0
+        self._code_to_track = {}
 
-    cpdef _process_trace(self):
+    def add_code(self,code):
+        if not code in self._code_to_track:
+            self._code_to_track[code] = 1
 
-        trace_stack = []
-        last_executed_statement = None
-        elapsed_time = 0
-        last_time = None
-        reverse_filename_map = dict([(v,k) for k,v in self._filename_map.items()])
-        for (current_time,event,filename_idx,line_number,back_filename_idx,back_line_number) in self._call_trace:
+    def remove_code(self,code):
+        if code in self._code_to_track:
+            del self._code_to_track[code]
 
-            filename = reverse_filename_map[filename_idx]
-            back_filename = reverse_filename_map[back_filename_idx]
-
-            if last_time:
-                elapsed_time = current_time-last_time
-
-            last_time = current_time
-
-            if last_executed_statement:
-                fn = last_executed_statement[0]
-                ln = last_executed_statement[1]
-                if not fn in self._profile:
-                    self._profile[fn] = {}
-                if not ln in self._profile[fn]:
-                    self._profile[fn][ln] = [0,0]
-                cnts = self._profile[fn][ln]
-                cnts[0]+=1
-                cnts[1]+=elapsed_time
-
-                if self.trace_hierarchy:
-                    for fn,ln in trace_stack:
-
-                        if not fn in self._profile:
-                            self._profile[fn] = {}
-                        if not ln in self._profile[fn]:
-                            self._profile[fn][ln] = [0,0]#
-
-                        cnts = self._profile[fn][ln]
-                        cnts[1]+=elapsed_time
-
-
-            last_executed_statement = [filename,line_number]
-
-            if event == PyTrace_CALL or event == PyTrace_C_CALL:
-                if back_filename:
-                    trace_stack.append([back_filename,back_line_number])
-            elif event == PyTrace_RETURN or event == PyTrace_C_RETURN:
-                if back_filename != None:
-                    if [back_filename,back_line_number] in trace_stack:
-                        trace_stack.remove([back_filename,back_line_number])
+    def stop(self,delete_self = True):
+        self._n_starts-=1
+        if self._n_starts == 0:
+            sys.settrace(None)
+            self._processed_profile = {}
 
     def start(self):
-        self._start_time = clock()/CLOCKS_PER_SEC
-        if self.method == "raw":
-            PyEval_SetTrace(trace_call_raw,self)
-        elif self.method == "normal":
+        self._n_starts+=1
+        if self.method == "normal":
             PyEval_SetTrace(trace_call,self)
         elif self.method == "dummy":
             PyEval_SetTrace(trace_call_dummy,self)
 
-
     def stop(self,delete_self = True):
         sys.settrace(None)
-        self._stop_time = clock()/CLOCKS_PER_SEC
-        if self.method == "raw":
-            self._process_trace()
-        if delete_self:
-            if __file__ in self._profile:
-                del self._profile[__file__]
-            if __file__[:-1] in self._profile:
-                del self._profile[__file__[:-1]]
+
+    def process_profile(self):
+        for code,timings in self._profile.items():
+            if not code.co_filename in self._processed_profile:
+                self._processed_profile[code.co_filename] = {}
+            d = self._processed_profile[code.co_filename]
+            for line,details in timings.items():
+                if not line in d:
+                    d[line] = [0,0]
+                d[line][0]+=details[0]
+                d[line][1]+=details[1]
+        return self._processed_profile
+
+    @property
+    def processed_profile(self):
+        self.process_profile()
+        return self._processed_profile
 
     @property
     def profile(self):
@@ -153,21 +114,6 @@ cdef class Tracer(object):
     def elapsed_time(self):
         return self._stop_time - self._start_time
 
-cdef int trace_call_raw(object self,PyFrameObject *py_frame,int event,PyObject* arg):
-
-    cdef double current_time
-    current_time = time.time()
-    frame = <object>py_frame
-
-    for fname in [frame.f_code.co_filename,frame.f_back.f_code.co_filename]:
-        if not fname in self._filename_map:
-            self._filename_map[fname] = self._filename_index
-            self._filename_index+=1
-
-    self._call_trace.append([current_time,event,self._filename_map[frame.f_code.co_filename],frame.f_back.f_lineno,self._filename_map[frame.f_back.f_code.co_filename],frame.f_back.f_lineno])
-
-    return 0
-
 cdef int trace_call_dummy(object self,PyFrameObject *py_frame,int event,PyObject* arg):
     
     return 0
@@ -176,52 +122,32 @@ cdef int trace_call(object self,PyFrameObject *py_frame,int event,PyObject* arg)
 
     cdef double current_time
     cdef double elapsed_time
-    cdef char *filename
-    cdef int line_number
-
-    current_time = clock()/CLOCKS_PER_SEC
 
     frame = <object>py_frame
 
-    if self._last_time:
-        elapsed_time = current_time-self._last_time
-    else:
-        elapsed_time = 0
-
-    self._last_time = current_time
-
-    if self._last_executed_statement:
-        filename = self._last_executed_statement[0]
-        line_number = self._last_executed_statement[1]
-        if not filename in self._profile:
-            self._profile[filename] = {}
-        if not line_number in self._profile[filename]:
-            self._profile[filename][line_number] = [0,0]
-        cnts = self._profile[filename][line_number]
-        cnts[0]+=1
-        cnts[1]+=elapsed_time
-
-        if self.trace_hierarchy:
-            for fn,ln in self._trace_stack:
-
-                if not fn in self._profile:
-                    self._profile[fn] = {}
-                if not ln in self._profile[fn]:
-                    self._profile[fn][ln] = [0,0]#
-
-                cnts = self._profile[fn][ln]
-                cnts[1]+=elapsed_time
-
-    self._last_executed_statement = (frame.f_code.co_filename,frame.f_lineno)
-
-    if not self.trace_hierarchy:
+    if not frame.f_code in self._code_to_track:
         return 0
 
-    if event == PyTrace_CALL or event == PyTrace_C_CALL:
-        if frame.f_back != None:
-            self._trace_stack.append([frame.f_back.f_code.co_filename,frame.f_back.f_lineno])
-    elif event == PyTrace_RETURN or event == PyTrace_C_RETURN:
-        if frame.f_back != None:
-            if [frame.f_back.f_code.co_filename,frame.f_back.f_lineno] in self._trace_stack:
-                self._trace_stack.remove([frame.f_back.f_code.co_filename,frame.f_back.f_lineno])
+    current_time = time.time()
+
+    if frame in self._last_executed_code:
+        last_executed_code,last_executed_line,last_executed_time = self._last_executed_code[frame]
+        elapsed_time = current_time-last_executed_time
+
+        if not last_executed_code in self._profile:
+            self._profile[last_executed_code] = {}
+        if not last_executed_line in self._profile[last_executed_code]:
+            self._profile[last_executed_code][last_executed_line] = [0,0.0]
+
+        pr = self._profile[last_executed_code][last_executed_line]
+
+        pr[0]+=1
+        pr[1]+=elapsed_time
+
+    if event == PyTrace_LINE:
+        self._last_executed_code[frame] = (frame.f_code,frame.f_lineno,current_time)
+    else:
+        if frame in self._last_executed_code:
+            del self._last_executed_code[frame]
+
     return 0
