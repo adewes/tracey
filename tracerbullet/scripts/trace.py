@@ -3,10 +3,13 @@ from tracerbullet.tracer import Tracer
 import traceback
 import sys
 import time
+import pprint
 import os
 import os.path
 import json
 import argparse
+
+from tracerbullet.profiler import set_profiler,get_profiler
 
 def parse_args(args):
     print args
@@ -26,21 +29,26 @@ def main():
     if '--' in sys.argv:
         i = sys.argv.index('--')
         our_args= sys.argv[1:i]
-        filename = sys.argv[i+1]
+        filename = os.path.abspath(sys.argv[i+1])
         args_for_cmd = sys.argv[i+2:]
 
     args = parse_args(our_args[1:])
 
     outfile = args.o
 
-    tracer = Tracer(verbose = False,method = "normal",trace_hierarchy = True)
+    tracer = Tracer(verbose = False,method = "normal")
+    set_profiler(tracer)
 
     with open(filename,"r") as python_file:
         sys.argv = [os.path.abspath(filename)]+sys.argv[3:]
         try:
             lc = {'__name__':'__main__'}
-            tracer.start()
-            exec python_file in lc,lc
+            start_time = time.time()
+            compiled_code = compile(python_file.read(),filename,'exec')
+            tracer.add_code(compiled_code)
+            tracer.add_code_by_id(filename+":sleep_some_more")
+            tracer.start(add_caller = False)
+            exec compiled_code in lc,lc
         except SystemExit as e:
             pass
         except BaseException as e:
@@ -48,10 +56,11 @@ def main():
             traceback.print_exc()
         finally:
             tracer.stop()
+            stop_time = time.time()
+    assert get_profiler() == tracer
     profile = tracer.processed_profile
-    if __file__ in profile:
-        del profile[__file__]
-    print "Elapsed time: %g" % tracer.elapsed_time
+    pprint.pprint(profile)
+    print "Elapsed time: %g" % (stop_time-start_time)
 
     with open(outfile,"wb") as output_file:
         output_file.write(json.dumps(profile,indent = 2))

@@ -13,4 +13,6 @@ def sleep_again():
 
 if __name__ == '__main__':
     time.sleep(0.1)
-    sleep_some_more()
+    for i in range(0,2):
+        sleep_some_more()
+    
