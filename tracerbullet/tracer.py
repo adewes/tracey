@@ -1,26 +1,27 @@
-#from tracerbullet import Tracer
 import time
 import sys  
 import inspect
 import copy
+import os
 
 from collections import defaultdict
 import tracerbullet
 
 class Tracer(object):
 
-    def __init__(self,verbose = True,trace_hierarchy = False,method = "normal"):
-        self.verbose = verbose
+    def __init__(self,config):
+        self.config = config
         self.reset()
+        self.cnt = 0
 
     def reset(self):
 
         self._profile = defaultdict(lambda : defaultdict(lambda : [0,0]) )
         self._last_executed_code = {}
         self._profile = {}
-        self._adjacent_code = defaultdict(lambda :0)
+        self._adjacent_code = defaultdict(lambda :defaultdict(lambda : defaultdict(lambda : 0)))
         self._n_starts = 0
-        self._code_to_track = {}
+        self._code_to_track = defaultdict(lambda : {})
         self._processed_profile = None
 
     def get_sorted_profile(self):
@@ -44,11 +45,17 @@ class Tracer(object):
             sys.settrace(None)
             self._processed_profile = {}
 
+    def pause(self):
+        sys.settrace(None)
+
+    def resume(self):
+        sys.settrace(self.trace)
+
     def _get_source(self,filename,min_line,max_line):
         with open(filename,"r") as input_file:
             content = input_file.read()
             lines = content.split("\n")
-            return lines[min_line-1:max_line+1]
+            return lines[min_line-1 if min_line-1 >= 0 else 0:max_line+1]
 
     def process_profile(self):
         self._processed_profile = {
@@ -56,14 +63,18 @@ class Tracer(object):
             'adjacent_code' : [],
         }
 
-        for code,n_calls in self._adjacent_code.items():
-            details = {
-                'filename' : code.co_filename,
-                'code_id' : self.get_code_id(code),
-                'name' : code.co_name,
-                'n_calls' : n_calls
-            }
-            self._processed_profile['adjacent_code'].append(details)
+        for referer,adjacent_code_by_line in self._adjacent_code.items():
+            for line_number,adjacent_code in adjacent_code_by_line.items():
+                for code,n_calls in adjacent_code.items():
+                    details = {
+                        'filename' : code.co_filename,
+                        'code_id' : self.get_code_id(code),
+                        'name' : code.co_name,
+                        'n_calls' : n_calls,
+                        'referer' : referer,
+                        'line_number' : line_number
+                    }
+                    self._processed_profile['adjacent_code'].append(details)
 
         for code,timings in self._profile.items():
             
@@ -86,10 +97,10 @@ class Tracer(object):
                     max_line = line
                 if not line in d:
                     d[line] = [0,0]
-                d[line][0]+=line_details[0]
-                d[line][1]+=line_details[1]
+                d[line][0]+=len(line_details)
+                d[line][1]+=sum(line_details)
 
-            details['source'] = (self._get_source(code.co_filename,min_line,max_line),(min_line,max_line))
+            details['source'] = (self._get_source(code.co_filename,min_line-2,max_line+2),(min_line -2 if min_line - 2 >= 1 else 1,max_line+2))
 
             self._processed_profile['profiles'].append(details)
 
@@ -101,8 +112,7 @@ class Tracer(object):
 
     @property
     def processed_profile(self):
-        if not self._processed_profile:
-            self.process_profile()
+        self.process_profile()
         return self._processed_profile
 
     @property
@@ -114,10 +124,16 @@ class Tracer(object):
         return self.add_code_by_id(code_id)
 
     def add_code_by_id(self,code_id):
-        print "Adding:",code_id
-        self._code_to_track[code_id] = 1
+        self._code_to_track['id'][code_id] = 1
+
+    def add_code_by_function(self,fn):
+        return self.add_code(fn.__code__)
+
+    def add_code_by_name(self,code_name):
+        self._code_to_track['name'][code_name] = 1
 
     def get_code_id(self,code):
+        module_name = inspect.getmodulename(code.co_filename)
         return code.co_filename+":"+code.co_name
 
     def remove_code(self,code):
@@ -125,21 +141,26 @@ class Tracer(object):
         self.remove_code_by_id(code_id)
 
     def remove_code_by_id(self,code_id):
-        if code_id in self._code_to_track:
-            del self._code_to_track[code_id]
-
+        if code_id in self._code_to_track['id']:
+            print "Removing: %s" % code_id
+            del self._code_to_track['id'][code_id]
+            for code in self._profile.keys():
+                if self.get_code_id(code) == code_id:
+                    print "Cleaning code profile..."
+                    del self._profile[code]
+    
     def trace(self,frame, event, arg,tracers = None):
 
         code_id = frame.f_code.co_filename+":"+frame.f_code.co_name
-
-        if not code_id in self._code_to_track:
+        if '_do_profile' in frame.f_locals:
+            self._code_to_track['id'][frame.f_code.co_filename+":"+frame.f_code.co_name] = True
+        if not code_id in self._code_to_track['id'] and not frame.f_code.co_name in self._code_to_track['name'] \
+           and not '_do_profile' in frame.f_locals:
             back_code_id = frame.f_back.f_code.co_filename+":"+frame.f_back.f_code.co_name
-            if back_code_id in self._code_to_track and not frame.f_code in self._adjacent_code:
-                self._adjacent_code[frame.f_code]+=1
+            if back_code_id in self._code_to_track['id']:
+                self._adjacent_code[back_code_id][frame.f_back.f_lineno][frame.f_code]+=1
                 print frame.f_back.f_code.co_name,"->",frame.f_code.co_name+"("+frame.f_code.co_filename+")"
             return self.trace
-        else:
-            print "::"+code_id
 
         current_time = time.time()
 
@@ -150,12 +171,11 @@ class Tracer(object):
             if not last_executed_code in self._profile:
                 self._profile[last_executed_code] = {}
             if not last_executed_line in self._profile[last_executed_code]:
-                self._profile[last_executed_code][last_executed_line] = [0,0.0]
+                self._profile[last_executed_code][last_executed_line] = []
 
             pr = self._profile[last_executed_code][last_executed_line]
 
-            pr[0]+=1
-            pr[1]+=elapsed_time
+            pr.append(elapsed_time)
 
         if event == "line":
             self._last_executed_code[frame] = (frame.f_code,frame.f_lineno,current_time)

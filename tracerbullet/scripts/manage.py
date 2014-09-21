@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import (unicode_literals,absolute_import)
 import sys
@@ -7,6 +7,7 @@ import time
 from types import ModuleType
 from tracerbullet import commands
 from tracerbullet.helpers import get_project_path,get_project_config
+from tracerbullet.models import Project
 
 def load_command_class():
     i = 1
@@ -34,7 +35,8 @@ def main():
     if project_path:
 
         try:
-            project_config = get_project_config(project_path+"/.tracerbullet")
+            project = Project(project_path+"/.tracerbullet")
+            project.load()
         except (IOError,):
             sys.stderr.write("No project configuration found!\n")
             exit(-1)
@@ -43,9 +45,10 @@ def main():
         if CommandClass.requires_valid_project:
             sys.stderr.write("Cannot find a tracerbullet project in the current directory tree, aborting.\n")
             exit(-1)
-        project_config = {}
+        project = None
 
-    command = CommandClass(project_config,prog = sys.argv[0]+" "+" ".join(command_chain),args = sys.argv[1+len(command_chain):])
+    command = CommandClass(project,prog = sys.argv[0]+" "+" ".join(command_chain),args = sys.argv[1+len(command_chain):])
+
     try:
         if 'help' in command.opts and command.opts['help']:
             print command.help_message()
@@ -54,5 +57,6 @@ def main():
     except KeyboardInterrupt:
         print "[CTRL-C pressed, aborting]"
         exit(-1)
+
 if __name__ == '__main__':
     main()

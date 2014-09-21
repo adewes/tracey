@@ -46,7 +46,7 @@ def main():
             start_time = time.time()
             compiled_code = compile(python_file.read(),filename,'exec')
             tracer.add_code(compiled_code)
-            tracer.add_code_by_id(filename+":sleep_some_more")
+#            tracer.add_code_by_id(filename+":sleep_some_more")
             tracer.start(add_caller = False)
             exec compiled_code in lc,lc
         except SystemExit as e:

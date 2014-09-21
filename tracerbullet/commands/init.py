@@ -25,9 +25,9 @@ class Command(BaseCommand):
     """
 
     def run(self):
-        print "Initializing new project"
-
         project_path = os.getcwd()
+        print "Initializing new project in %s" % project_path
+
         config_path = project_path+"/.tracerbullet"
         print config_path
 

@@ -4,9 +4,13 @@ import json
 def get_project_path(path = None):
     if not path:
         path = os.getcwd()
-    files = os.listdir(path)
-    if ".tracerbullet" in files and os.path.isdir(path+"/.tracerbullet"):
-        return path
+    
+    while path != "/":
+        files = os.listdir(path)
+        if ".tracerbullet" in files and os.path.isdir(path+"/.tracerbullet"):
+            return path
+        path = os.path.dirname(path)
+
     return None 
 
 def get_project_config(path):
