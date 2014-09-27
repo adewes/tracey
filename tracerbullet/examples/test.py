@@ -12,6 +12,7 @@ def sleep_again():
     raise BaseException("boo!")
 
 if __name__ == '__main__':
+    print "Sleeping"
     time.sleep(0.1)
     for i in range(0,2):
         sleep_some_more()

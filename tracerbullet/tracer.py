@@ -57,6 +57,24 @@ class Tracer(object):
             lines = content.split("\n")
             return lines[min_line-1 if min_line-1 >= 0 else 0:max_line+1]
 
+    def get_module_name_from_filename(self,filename):
+        absolute_filename = os.path.abspath(filename)
+        best_match = None
+        for path in sys.path:
+            absolute_path = os.path.abspath(path)
+            if absolute_filename.startswith(absolute_path):
+                if best_match is None or len(absolute_path) > len(best_match):
+                    best_match = absolute_path
+        if best_match is not None:
+            relative_filename = absolute_filename[len(best_match)+1:]
+            if relative_filename.endswith("/__init__.py"):
+                relative_filename=relative_filename[:-len("/__init__.py")]
+            if relative_filename.endswith(".py"):
+                relative_filename = relative_filename[:-3]
+            module_name = relative_filename.replace("/",".")
+            return module_name
+        return None
+
     def process_profile(self):
         self._processed_profile = {
             'profiles' : [],
@@ -72,7 +90,9 @@ class Tracer(object):
                         'name' : code.co_name,
                         'n_calls' : n_calls,
                         'referer' : referer,
-                        'line_number' : line_number
+                        'linking_line_number' : code.co_firstlineno,
+                        'line_number' : line_number,
+                        'module_name' : self.get_module_name_from_filename(code.co_filename)
                     }
                     self._processed_profile['adjacent_code'].append(details)
 
@@ -83,7 +103,9 @@ class Tracer(object):
             details = {
                 'code_id' : code_id,
                 'filename' : code.co_filename,
+                'module_name' : self.get_module_name_from_filename(code.co_filename),
                 'name' : code.co_name,
+                'line_number' : code.co_firstlineno,
                 'times' : {}
             }
 
@@ -103,6 +125,14 @@ class Tracer(object):
             details['source'] = (self._get_source(code.co_filename,min_line-2,max_line+2),(min_line -2 if min_line - 2 >= 1 else 1,max_line+2))
 
             self._processed_profile['profiles'].append(details)
+
+        self._processed_profile['tracked_code'] = [{'code_id' : code_id} for code_id in self._code_to_track['id'].keys()]
+
+        for d in self._processed_profile['tracked_code']:
+            filename,name = d['code_id'].split(":")
+            d['filename'] = filename
+            d['name'] = name
+            d['module_name'] = self.get_module_name_from_filename(filename)
 
         return self._processed_profile
 
@@ -154,12 +184,13 @@ class Tracer(object):
         code_id = frame.f_code.co_filename+":"+frame.f_code.co_name
         if '_do_profile' in frame.f_locals:
             self._code_to_track['id'][frame.f_code.co_filename+":"+frame.f_code.co_name] = True
+
+        back_code_id = frame.f_back.f_code.co_filename+":"+frame.f_back.f_code.co_name
+        if back_code_id in self._code_to_track['id']:
+            self._adjacent_code[back_code_id][frame.f_back.f_lineno][frame.f_code]+=1
+
         if not code_id in self._code_to_track['id'] and not frame.f_code.co_name in self._code_to_track['name'] \
            and not '_do_profile' in frame.f_locals:
-            back_code_id = frame.f_back.f_code.co_filename+":"+frame.f_back.f_code.co_name
-            if back_code_id in self._code_to_track['id']:
-                self._adjacent_code[back_code_id][frame.f_back.f_lineno][frame.f_code]+=1
-                print frame.f_back.f_code.co_name,"->",frame.f_code.co_name+"("+frame.f_code.co_filename+")"
             return self.trace
 
         current_time = time.time()

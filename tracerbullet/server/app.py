@@ -71,9 +71,24 @@ def remove(code_id):
 def index():
     app.server.command_queue.put(["get_profile"])
     result = app.server.response_queue.get()
-    context = {'profiles' : []}
-    tracked_code_ids = dict([(profile['code_id'],True) for profile in result['profiles']])
+
+    """
+    Two dicts:
+
+    -tracked_code -> Which code_ids we want to track
+    -profiles -> Actual results of tracer
+    """
+
+    results = defaultdict(lambda : {'profiles' : defaultdict(lambda : []),'tracked' : {}})
+
+
+    tracked_code_ids = dict([(d['code_id'],True) for d in result['tracked_code']])
+    [tracked_code_ids.update({d['code_id'] : True}) for d in result['profiles']]
+
     for profile in result['profiles']:
+
+        results[profile['module_name']]['profiles'][profile['name']].append(profile)
+
         source = "\n".join(profile['source'][0])
         first_line,last_line = profile['source'][1]
         formatted_lines = pygments.highlight(source,PythonLexer(),HtmlFormatter(nowrap = True)).split("\n")
@@ -84,9 +99,8 @@ def index():
                 formatted_lines = formatted_lines[:-1]
             else:
                 break
-        profile['code'] = "\n".join(formatted_lines)
+        profile['code'] = "\n".join(["<div>%s</div>" % s for s in formatted_lines])
         profile['timings'] = [profile['times'][first_line+i] if first_line+i in profile['times'] else None for i in range(0,len(formatted_lines))]
-        context['profiles'].append(profile)
         profile['adjacent_code'] = defaultdict(list)
         for adjacent_code in result['adjacent_code']:
             if adjacent_code['referer'] == profile['code_id']:
@@ -95,6 +109,14 @@ def index():
                 else:
                     adjacent_code['tracked'] = False
                 profile['adjacent_code'][adjacent_code['line_number']].append(adjacent_code)
+
+
+    for d in result['tracked_code']:
+        if not d['name'] in results[d['module_name']]['profiles']:
+            results[d['module_name']]['tracked'][d['name']] = d
+
+    context = {'results' : results}
+
     context.update(render_context)
     response = make_response(render_template("index.html",**context))
     return response

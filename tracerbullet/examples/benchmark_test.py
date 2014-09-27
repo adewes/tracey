@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 import time
-import numpy as np
 import time
 import pprint
 
@@ -23,7 +22,7 @@ def calc_something():
     for i in range(0,50):
         foo(i)
     return s
-
+print "Let's go"
 if __name__ == '__main__':
-    
+    print "Starting"
     calc_something()
